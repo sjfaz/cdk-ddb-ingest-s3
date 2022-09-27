@@ -78,10 +78,10 @@ export const handler = async (event: S3Event) => {
         let putRequestBatch: Array<Object> = [];
 
         for await (const csvRow of csvReadStream) {
-          const postcode = `${
-            csvRow[Headers[3]].split(" ")[0]
-          }#${short.generate()}`;
-          const saleDate = new Date(csvRow[Headers[2]]).toISOString();
+          const postcode = csvRow[Headers[3]].split(" ")[0];
+          const saleDate = `${new Date(
+            csvRow[Headers[2]]
+          ).toISOString()}#${short.generate()}`;
 
           if (postcode && saleDate) {
             const item: StringMap = {
