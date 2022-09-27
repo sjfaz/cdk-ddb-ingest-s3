@@ -4,6 +4,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import csv from "csv-parser";
 import { Readable } from "stream";
 import { DocumentClient } from "aws-sdk/clients/dynamodb";
+import short from "short-uuid";
 
 const PK_PREFIX = "REGION#";
 const SK_PREFIX = "DATE#";
@@ -77,8 +78,10 @@ export const handler = async (event: S3Event) => {
         let putRequestBatch: Array<Object> = [];
 
         for await (const csvRow of csvReadStream) {
-          const postcode = csvRow[Headers[3]];
-          const saleDate = csvRow[Headers[2]];
+          const postcode = `${
+            csvRow[Headers[3]].split(" ")[0]
+          }#${short.generate()}`;
+          const saleDate = new Date(csvRow[Headers[2]]).toISOString();
 
           if (postcode && saleDate) {
             const item: StringMap = {
