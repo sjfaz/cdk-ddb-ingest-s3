@@ -5,6 +5,8 @@ import csv from "csv-parser";
 import { Readable } from "stream";
 import { DocumentClient } from "aws-sdk/clients/dynamodb";
 import short from "short-uuid";
+import { PromiseResult } from "aws-sdk/lib/request";
+import { AWSError } from "aws-sdk";
 
 const PK_PREFIX = "REGION#";
 const SK_PREFIX = "DATE#";
@@ -21,35 +23,50 @@ const db = new DocumentClient({
 });
 
 const logger = (msg: string) => console.log(msg);
+type CodeCount = { code: number; count: number };
+type Counter = { total: number; retried: number; returnCodes: CodeCount[] };
+const counters: Counter = { total: 0, retried: 0, returnCodes: [] };
+interface StringMap {
+  [key: string]: string;
+}
 
-const counters = { total: 0, retried: 0 };
+const addStatusCodeCounter = (statusCode: number) => {
+  const index = counters.returnCodes.findIndex((c) => c.code === statusCode);
+  if (index === -1) {
+    counters.returnCodes.push({ code: statusCode, count: 1 });
+  } else {
+    counters.returnCodes[index].count++;
+  }
+};
 
 const batchWithRetry = async (putRequestBatch: Array<Object>) => {
   return new Promise<void>(async (resolve) => {
+    let res:
+      | PromiseResult<DocumentClient.BatchWriteItemOutput, AWSError>
+      | undefined;
     try {
       counters.total += putRequestBatch.length;
-      const res = await db
+      res = await db
         .batchWrite({
           RequestItems: {
             [TABLE_NAME]: putRequestBatch,
           },
         })
         .promise();
+
       if (res.UnprocessedItems && res.UnprocessedItems[TABLE_NAME]) {
         const unprocessed = res.UnprocessedItems[TABLE_NAME];
         counters.retried += unprocessed.length;
+        addStatusCodeCounter(res.$response.httpResponse.statusCode);
         await batchWithRetry(unprocessed);
       }
     } catch (err) {
+      logger(`StatusCode: ${res?.$response.httpResponse.statusCode}`);
       logger(`Error: ${err}`);
     }
     resolve();
   });
 };
-
-interface StringMap {
-  [key: string]: string;
-}
 
 export const handler = async (event: S3Event) => {
   try {
@@ -101,7 +118,7 @@ export const handler = async (event: S3Event) => {
               },
             });
           } else {
-            logger("Missing data from row: " + JSON.stringify(csvRow));
+            // logger("Missing data from row: " + JSON.stringify(csvRow));
           }
 
           if (putRequestBatch.length === BATCH_WRITE_SIZE) {
